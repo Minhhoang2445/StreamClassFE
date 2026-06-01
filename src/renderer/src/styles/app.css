@@ -1381,10 +1381,22 @@ th {
   padding: 10px 12px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.08);
+  min-width: 0;
 }
 
 .chat-message-own .chat-message-content {
   background: rgba(59, 130, 246, 0.5);
+}
+
+.chat-message-content-file {
+  width: min(320px, 85%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.chat-message-own .chat-message-content-file {
+  border-color: rgba(147, 197, 253, 0.28);
+  background: rgba(37, 99, 235, 0.46);
 }
 
 .chat-message-header {
@@ -1451,12 +1463,163 @@ th {
   font-size: 11px;
 }
 
+.chat-file-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chat-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #dbeafe;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.chat-file-details {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-file-name {
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-file-meta {
+  min-height: 16px;
+  color: #cbd5e1;
+  font-size: 11px;
+}
+
+.chat-file-caption {
+  margin: 4px 0 0;
+  color: #f3f4f6;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.chat-file-download-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.chat-file-download-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.chat-file-download-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .chat-input-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 12px;
+}
+
+.chat-file-input {
+  display: none;
+}
+
+.chat-selected-file {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.chat-selected-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 36px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.18);
+  color: #bfdbfe;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.chat-selected-file-info {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-selected-file-name {
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-selected-file-size {
+  color: #9ca3af;
+  font-size: 11px;
+}
+
+.chat-remove-file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f3f4f6;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.chat-remove-file-button:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.22);
+  color: #fecaca;
+}
+
+.chat-remove-file-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .chat-input {
@@ -1498,6 +1661,36 @@ th {
 .chat-input-char-count {
   color: #9ca3af;
   font-size: 12px;
+}
+
+.chat-input-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-attach-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.2s;
+}
+
+.chat-attach-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.chat-attach-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .chat-send-button {

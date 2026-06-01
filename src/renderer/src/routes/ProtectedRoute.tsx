@@ -8,14 +8,14 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ allowedRoles, children }: ProtectedRouteProps): JSX.Element {
-  const { isAuthenticated, role } = useAuth()
+  const { isAuthenticated, role, token } = useAuth()
   const location = useLocation()
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location }} />
   }
 
-  if (allowedRoles && (!role || !allowedRoles.includes(role))) {
+  if (allowedRoles && token && (!role || !allowedRoles.includes(role))) {
     return <Navigate to="/dashboard" replace />
   }
 

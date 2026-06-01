@@ -6,10 +6,11 @@ import {
   useMemo,
   useState
 } from 'react'
-import { login as loginApi } from '../api/authApi'
+import { refreshTokens } from '../api/httpClient'
+import { login as loginApi, logout as logoutApi } from '../api/authApi'
 import { AuthUser, LoginRequest } from '../types/auth'
-import { clearStoredToken, getStoredToken, setStoredToken } from '../utils/authToken'
-import { decodeJwt, isTokenExpired, normalizeRole } from '../utils/jwt'
+import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '../utils/tokenStorage'
+import { decodeJwt, normalizeRole } from '../utils/jwt'
 
 interface AuthContextValue {
   token: string | null
@@ -18,7 +19,7 @@ interface AuthContextValue {
   role: AuthUser['role']
   isAuthenticated: boolean
   login: (request: LoginRequest) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null)
@@ -37,41 +38,82 @@ function userFromToken(token: string): AuthUser | null {
 }
 
 export function AuthProvider({ children }: PropsWithChildren): JSX.Element {
-  const [token, setToken] = useState<string | null>(() => {
-    const storedToken = getStoredToken()
-
-    if (!storedToken || isTokenExpired(storedToken)) {
-      clearStoredToken()
-      return null
-    }
-
-    return storedToken
-  })
+  const [token, setToken] = useState<string | null>(() => getAccessToken())
+  const [hasRefreshToken, setHasRefreshToken] = useState(() => Boolean(getRefreshToken()))
 
   const currentUser = useMemo(() => (token ? userFromToken(token) : null), [token])
 
-  const logout = useCallback(() => {
-    clearStoredToken()
+  const clearAuthState = useCallback(() => {
+    clearTokens()
     setToken(null)
+    setHasRefreshToken(false)
   }, [])
+
+  const logout = useCallback(async () => {
+    const refreshToken = getRefreshToken()
+
+    try {
+      if (refreshToken) {
+        await logoutApi(refreshToken)
+      }
+    } catch (error) {
+      console.warn('Logout request failed, clearing local auth state anyway:', error)
+    } finally {
+      clearAuthState()
+    }
+  }, [clearAuthState])
 
   const login = useCallback(async (request: LoginRequest) => {
     const response = await loginApi(request)
-    setStoredToken(response.token)
-    setToken(response.token)
+    setTokens(response.accessToken, response.refreshToken)
+    setToken(response.accessToken)
+    setHasRefreshToken(true)
   }, [])
 
   useEffect(() => {
     const handleUnauthorized = (): void => {
-      logout()
+      clearAuthState()
+    }
+
+    const handleTokenRefreshed = (event: Event): void => {
+      const refreshedToken = (event as CustomEvent<string>).detail ?? getAccessToken()
+      setToken(refreshedToken)
+      setHasRefreshToken(Boolean(getRefreshToken()))
     }
 
     window.addEventListener('auth:unauthorized', handleUnauthorized)
+    window.addEventListener('auth:token-refreshed', handleTokenRefreshed)
 
     return () => {
       window.removeEventListener('auth:unauthorized', handleUnauthorized)
+      window.removeEventListener('auth:token-refreshed', handleTokenRefreshed)
     }
-  }, [logout])
+  }, [clearAuthState])
+
+  useEffect(() => {
+    if (token || !hasRefreshToken) {
+      return
+    }
+
+    let cancelled = false
+
+    refreshTokens()
+      .then((response) => {
+        if (!cancelled) {
+          setToken(response.accessToken)
+          setHasRefreshToken(true)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          clearAuthState()
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [clearAuthState, hasRefreshToken, token])
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -79,11 +121,11 @@ export function AuthProvider({ children }: PropsWithChildren): JSX.Element {
       currentUser,
       username: currentUser?.username ?? null,
       role: currentUser?.role ?? null,
-      isAuthenticated: Boolean(token),
+      isAuthenticated: Boolean(token || hasRefreshToken),
       login,
       logout
     }),
-    [currentUser, login, logout, token]
+    [currentUser, hasRefreshToken, login, logout, token]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

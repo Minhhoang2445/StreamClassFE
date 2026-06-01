@@ -546,7 +546,6 @@ export function LiveRoomPage(): JSX.Element {
     setRoomToken(null)
     setRemoteParticipants([])
     setScreenShareEnabled(false)
-    setChatMessages([])
     setConnectionState('disconnected')
     navigate(
       returnTo || (roomToken?.classroomId ? `/classrooms/${roomToken.classroomId}` : '/classrooms')

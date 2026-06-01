@@ -5,9 +5,16 @@ import axios, {
   AxiosResponse,
   InternalAxiosRequestConfig
 } from 'axios'
-import { clearStoredToken, getStoredToken } from '../utils/authToken'
+import type { AuthResponse } from '../types/auth'
+import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '../utils/tokenStorage'
 
-export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
+export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
+
+interface RetryAxiosRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean
+}
+
+let refreshPromise: Promise<AuthResponse> | null = null
 
 function appendParams(url: URL, params: InternalAxiosRequestConfig['params']): void {
   if (!params) {
@@ -39,6 +46,10 @@ function headersToRecord(headers: InternalAxiosRequestConfig['headers']): Record
 const electronHttpAdapter: AxiosAdapter = async (
   config: InternalAxiosRequestConfig
 ): Promise<AxiosResponse> => {
+  if (!config.baseURL) {
+    throw new Error('VITE_API_BASE_URL is not configured.')
+  }
+
   const targetUrl = new URL(config.url ?? '', config.baseURL)
   appendParams(targetUrl, config.params)
 
@@ -73,6 +84,73 @@ const electronHttpAdapter: AxiosAdapter = async (
   return axiosResponse
 }
 
+function parseAuthResponse(data: string): AuthResponse {
+  const body = JSON.parse(data) as Partial<AuthResponse>
+
+  if (!body.accessToken || !body.refreshToken || !body.tokenType) {
+    throw new Error('Backend refresh response khong dung contract accessToken/refreshToken.')
+  }
+
+  return {
+    accessToken: body.accessToken,
+    refreshToken: body.refreshToken,
+    tokenType: body.tokenType
+  }
+}
+
+async function requestTokenRefresh(): Promise<AuthResponse> {
+  if (!apiBaseUrl) {
+    throw new Error('VITE_API_BASE_URL is not configured.')
+  }
+
+  const refreshToken = getRefreshToken()
+
+  if (!refreshToken) {
+    throw new Error('Refresh token not found')
+  }
+
+  const targetUrl = new URL('/api/auth/refresh', apiBaseUrl)
+  const response = await window.api.httpRequest({
+    url: targetUrl.toString(),
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ refreshToken })
+  })
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Refresh token failed with status ${response.status}`)
+  }
+
+  const tokens = parseAuthResponse(response.data)
+  setTokens(tokens.accessToken, tokens.refreshToken)
+  window.dispatchEvent(new CustomEvent('auth:token-refreshed', { detail: tokens.accessToken }))
+  return tokens
+}
+
+export function refreshTokens(): Promise<AuthResponse> {
+  if (!refreshPromise) {
+    refreshPromise = requestTokenRefresh()
+      .catch((error) => {
+        clearTokens()
+        window.dispatchEvent(new Event('auth:unauthorized'))
+        throw error
+      })
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+
+  return refreshPromise
+}
+
+function rejectAsUnauthorized(error: unknown): Promise<never> {
+  clearTokens()
+  window.dispatchEvent(new Event('auth:unauthorized'))
+  return Promise.reject(error)
+}
+
 export const httpClient = axios.create({
   adapter: electronHttpAdapter,
   baseURL: apiBaseUrl,
@@ -82,7 +160,7 @@ export const httpClient = axios.create({
 })
 
 httpClient.interceptors.request.use((config) => {
-  const token = getStoredToken()
+  const token = getAccessToken()
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
@@ -93,12 +171,25 @@ httpClient.interceptors.request.use((config) => {
 
 httpClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      clearStoredToken()
-      window.dispatchEvent(new Event('auth:unauthorized'))
+  async (error: AxiosError) => {
+    const originalRequest = error.config as RetryAxiosRequestConfig | undefined
+    const status = error.response?.status
+    const isAuthError = status === 401 || status === 403
+    const isAuthEndpoint = originalRequest?.url?.startsWith('/api/auth/')
+
+    if (!isAuthError || !originalRequest || originalRequest._retry || isAuthEndpoint) {
+      return Promise.reject(error)
     }
 
-    return Promise.reject(error)
+    originalRequest._retry = true
+
+    try {
+      const tokens = await refreshTokens()
+      originalRequest.headers = AxiosHeaders.from(originalRequest.headers)
+      originalRequest.headers.Authorization = `Bearer ${tokens.accessToken}`
+      return httpClient(originalRequest)
+    } catch (refreshError) {
+      return rejectAsUnauthorized(refreshError)
+    }
   }
 )

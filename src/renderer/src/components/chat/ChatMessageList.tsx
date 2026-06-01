@@ -5,9 +5,22 @@ import { ChatMessageItem } from './ChatMessageItem'
 interface ChatMessageListProps {
   messages: ChatMessageResponse[]
   currentUserId?: string
+  onDownloadFile: (message: ChatMessageResponse) => Promise<void>
 }
 
-export function ChatMessageList({ messages, currentUserId }: ChatMessageListProps): JSX.Element {
+function isOwnMessage(message: ChatMessageResponse, currentUserId?: string): boolean {
+  if (!currentUserId) {
+    return false
+  }
+
+  return message.senderId === currentUserId || message.senderUsername === currentUserId
+}
+
+export function ChatMessageList({
+  messages,
+  currentUserId,
+  onDownloadFile
+}: ChatMessageListProps): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -27,7 +40,8 @@ export function ChatMessageList({ messages, currentUserId }: ChatMessageListProp
           <ChatMessageItem
             key={message.id}
             message={message}
-            isOwn={currentUserId === message.senderId}
+            isOwn={isOwnMessage(message, currentUserId)}
+            onDownloadFile={onDownloadFile}
           />
         ))
       )}

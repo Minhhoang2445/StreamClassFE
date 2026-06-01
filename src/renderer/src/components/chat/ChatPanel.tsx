@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useSessionChat } from '../../hooks/useSessionChat'
 import { ChatMessageList } from './ChatMessageList'
 import { ChatInput } from './ChatInput'
 import { useAuth } from '../../hooks/useAuth'
+import type { ChatMessageResponse } from '../../types/chat'
 
 interface ChatPanelProps {
   sessionId: string
@@ -12,8 +13,18 @@ interface ChatPanelProps {
 
 export function ChatPanel({ sessionId, className, enabled = true }: ChatPanelProps): JSX.Element {
   const { currentUser } = useAuth()
-  const [tabIndex, setTabIndex] = useState(0)
-  const { messages, connected, sending, error, sendMessage, disconnect } = useSessionChat(sessionId, {
+  const {
+    messages,
+    connected,
+    sending,
+    uploadingFile,
+    uploadError,
+    error,
+    sendMessage,
+    sendFile,
+    downloadFile,
+    disconnect
+  } = useSessionChat(sessionId, {
     enabled
   })
 
@@ -29,7 +40,13 @@ export function ChatPanel({ sessionId, className, enabled = true }: ChatPanelPro
     await sendMessage(content)
   }
 
-  const unreadCount = messages.filter((m) => m.senderId !== currentUser?.username).length
+  const handleSendFile = async (file: File, caption?: string): Promise<void> => {
+    await sendFile(file, caption)
+  }
+
+  const handleDownloadFile = async (message: ChatMessageResponse): Promise<void> => {
+    await downloadFile(message)
+  }
 
   return (
     <div className={`realtime-chat-panel ${className || ''}`}>
@@ -41,14 +58,21 @@ export function ChatPanel({ sessionId, className, enabled = true }: ChatPanelPro
           </span>
         </div>
         {error && <div className="chat-panel-error">{error.message}</div>}
+        {uploadError && <div className="chat-panel-error">{uploadError}</div>}
       </div>
 
-      <ChatMessageList messages={messages} currentUserId={currentUser?.username} />
+      <ChatMessageList
+        messages={messages}
+        currentUserId={currentUser?.username}
+        onDownloadFile={handleDownloadFile}
+      />
 
       <ChatInput
-        onSendMessage={handleSendMessage}
+        onSendText={handleSendMessage}
+        onSendFile={handleSendFile}
         disabled={!connected}
         sending={sending}
+        uploading={uploadingFile}
       />
     </div>
   )

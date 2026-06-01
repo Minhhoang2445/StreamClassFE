@@ -1,23 +1,29 @@
 import { httpClient } from './httpClient'
-import type { LoginRequest, LoginResponse, RegisterRequest } from '../types/auth'
+import type { AuthResponse, LoginRequest, RegisterRequest } from '../types/auth'
 
-const LOGIN_PREFIX = 'Login successful '
+function normalizeAuthResponse(data: unknown): AuthResponse {
+  const body = typeof data === 'string' ? JSON.parse(data) : data
 
-export async function login(request: LoginRequest): Promise<LoginResponse> {
-  const response = await httpClient.post<string>('/api/auth/login', request, {
-    responseType: 'text',
-    transformResponse: [(data) => data]
-  })
-
-  const body = String(response.data)
-
-  if (!body.startsWith(LOGIN_PREFIX)) {
-    throw new Error('Backend login response khong dung contract hien tai.')
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    !('accessToken' in body) ||
+    !('refreshToken' in body) ||
+    !('tokenType' in body)
+  ) {
+    throw new Error('Backend auth response khong dung contract accessToken/refreshToken.')
   }
 
-  return {
-    token: body.slice(LOGIN_PREFIX.length).trim()
-  }
+  return body as AuthResponse
+}
+
+export async function login(request: LoginRequest): Promise<AuthResponse> {
+  const response = await httpClient.post<unknown>('/api/auth/login', request)
+  return normalizeAuthResponse(response.data)
+}
+
+export async function logout(refreshToken: string): Promise<void> {
+  await httpClient.post('/api/auth/logout', { refreshToken })
 }
 
 export async function register(request: RegisterRequest): Promise<string> {

@@ -9,8 +9,14 @@ export interface LoginRequest {
   password: string
 }
 
-export interface LoginResponse {
-  token: string
+export interface AuthResponse {
+  accessToken: string
+  refreshToken: string
+  tokenType: string
+}
+
+export interface RefreshTokenRequest {
+  refreshToken: string
 }
 
 export interface RegisterRequest {
