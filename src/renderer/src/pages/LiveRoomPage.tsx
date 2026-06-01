@@ -2,10 +2,7 @@ import { Participant, Room, RoomEvent, Track, type AudioTrack, type VideoTrack }
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { getLiveSessionById, joinSession, startSession } from '../api/liveSessionApi'
-import {
-  ChatPanel,
-  type ClassroomChatMessage
-} from '../components/classroom/ChatPanel'
+import { ChatPanel } from '../components/chat/ChatPanel'
 import { ControlBar } from '../components/classroom/ControlBar'
 import { MainStage } from '../components/classroom/MainStage'
 import { ParticipantSidebar } from '../components/classroom/ParticipantSidebar'
@@ -18,8 +15,6 @@ import type { LiveSessionResponse, LiveSessionTokenResponse } from '../types/liv
 import { LiveSessionStatus } from '../types/liveSession'
 import { getApiErrorMessage } from '../utils/apiError'
 
-const CHAT_TOPIC = 'classroom-chat'
-const CHAT_MESSAGE_TYPE = 'classroom-chat-message'
 
 interface LiveRoomLocationState {
   tokenResponse?: LiveSessionTokenResponse
@@ -50,15 +45,6 @@ interface ClassroomTrackGroups {
   audioTracks: AudioTrackItem[]
   cameraTracks: VideoTrackItem[]
   screenShareTracks: VideoTrackItem[]
-}
-
-interface ChatPayload {
-  id?: unknown
-  senderIdentity?: unknown
-  senderName?: unknown
-  sentAt?: unknown
-  text?: unknown
-  type?: unknown
 }
 
 function statusLabel(state: ConnectionUiState): string {
@@ -296,46 +282,6 @@ function formatDuration(startTime: string | null, now: number): string | undefin
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
-function parseChatMessage(payload: Uint8Array, participant: Participant): ClassroomChatMessage | null {
-  try {
-    const decoded = new TextDecoder().decode(payload)
-    const parsed = JSON.parse(decoded) as ChatPayload
-
-    if (
-      parsed.type !== CHAT_MESSAGE_TYPE ||
-      typeof parsed.id !== 'string' ||
-      typeof parsed.text !== 'string'
-    ) {
-      return null
-    }
-
-    return {
-      id: parsed.id,
-      senderIdentity:
-        typeof parsed.senderIdentity === 'string' ? parsed.senderIdentity : participant.identity,
-      senderName:
-        typeof parsed.senderName === 'string'
-          ? parsed.senderName
-          : participant.name || participant.identity || 'Participant',
-      sentAt: typeof parsed.sentAt === 'string' ? parsed.sentAt : new Date().toISOString(),
-      text: parsed.text
-    }
-  } catch {
-    return null
-  }
-}
-
-function appendChatMessage(
-  messages: ClassroomChatMessage[],
-  message: ClassroomChatMessage
-): ClassroomChatMessage[] {
-  if (messages.some((item) => item.id === message.id)) {
-    return messages
-  }
-
-  return [...messages, message]
-}
-
 export function LiveRoomPage(): JSX.Element {
   const { sessionId = '' } = useParams()
   const location = useLocation()
@@ -358,7 +304,6 @@ export function LiveRoomPage(): JSX.Element {
   const [screenShareEnabled, setScreenShareEnabled] = useState(false)
   const [participantsOpen, setParticipantsOpen] = useState(true)
   const [chatOpen, setChatOpen] = useState(false)
-  const [chatMessages, setChatMessages] = useState<ClassroomChatMessage[]>([])
   const [now, setNow] = useState(() => Date.now())
   const [renderVersion, setRenderVersion] = useState(0)
   const roomRef = useRef<Room | null>(null)
@@ -488,23 +433,6 @@ export function LiveRoomPage(): JSX.Element {
       }
     }
 
-    const handleDataReceived = (
-      payload: Uint8Array,
-      participant: Participant,
-      _kind: unknown,
-      topic?: string
-    ): void => {
-      if (topic !== CHAT_TOPIC) {
-        return
-      }
-
-      const message = parseChatMessage(payload, participant)
-
-      if (message) {
-        setChatMessages((messages) => appendChatMessage(messages, message))
-      }
-    }
-
     const connect = async (): Promise<void> => {
       if (!roomToken.livekitUrl || !roomToken.token) {
         setError('Backend token response thieu livekitUrl hoac token.')
@@ -528,7 +456,6 @@ export function LiveRoomPage(): JSX.Element {
         .on(RoomEvent.LocalTrackUnpublished, updateParticipants)
         .on(RoomEvent.ActiveSpeakersChanged, updateParticipants)
         .on(RoomEvent.ParticipantNameChanged, updateParticipants)
-        .on(RoomEvent.DataReceived, handleDataReceived)
 
       try {
         setConnectionState('connecting')
@@ -590,7 +517,6 @@ export function LiveRoomPage(): JSX.Element {
         .off(RoomEvent.LocalTrackUnpublished, updateParticipants)
         .off(RoomEvent.ActiveSpeakersChanged, updateParticipants)
         .off(RoomEvent.ParticipantNameChanged, updateParticipants)
-        .off(RoomEvent.DataReceived, handleDataReceived)
       activeRoom.disconnect()
       if (roomRef.current === activeRoom) {
         roomRef.current = null
@@ -701,46 +627,6 @@ export function LiveRoomPage(): JSX.Element {
   }
 }
 
-  const sendChatMessage = useCallback(
-    async (text: string): Promise<void> => {
-      if (!room) {
-        return
-      }
-
-      const localParticipant = room.localParticipant
-      const message: ClassroomChatMessage = {
-        id: `${localParticipant.identity || 'local'}-${Date.now()}`,
-        senderIdentity: localParticipant.identity,
-        senderName:
-          roomToken?.username ||
-          localParticipant.name ||
-          localParticipant.identity ||
-          'Participant',
-        sentAt: new Date().toISOString(),
-        text
-      }
-
-      const payload = new TextEncoder().encode(
-        JSON.stringify({
-          ...message,
-          type: CHAT_MESSAGE_TYPE
-        })
-      )
-
-      try {
-        await localParticipant.publishData(payload, {
-          reliable: true,
-          topic: CHAT_TOPIC
-        })
-        setChatMessages((messages) => appendChatMessage(messages, message))
-      } catch (err) {
-        setError(getApiErrorMessage(err))
-        throw err
-      }
-    },
-    [room, roomToken?.username]
-  )
-
   const participantCount = useMemo(
     () => (room ? remoteParticipants.length + 1 : 0),
     [remoteParticipants.length, room]
@@ -822,11 +708,8 @@ export function LiveRoomPage(): JSX.Element {
 
           {chatOpen ? (
             <ChatPanel
-              currentIdentity={room?.localParticipant.identity}
-              disabled={!room}
-              messages={chatMessages}
-              onClose={() => setChatOpen(false)}
-              onSendMessage={room ? sendChatMessage : undefined}
+              sessionId={sessionId}
+              enabled={!!room}
             />
           ) : null}
         </section>

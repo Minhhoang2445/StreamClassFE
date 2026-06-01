@@ -23,6 +23,7 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@stomp/stompjs": "^7.3.0",
     "axios": "^1.16.1",
     "electron-updater": "^6.3.9",
     "livekit-client": "^2.19.0",
