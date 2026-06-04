@@ -9,11 +9,13 @@ interface ControlBarProps {
   onToggleMic: () => void
   onToggleParticipants: () => void
   onToggleScreenShare: () => void
+  onToggleWhiteboard: () => void
   participantCount: number
   participantsOpen: boolean
   screenShareEnabled: boolean
   screenShareSupported?: boolean
   showScreenShare: boolean
+  whiteboardOpen: boolean
 }
 
 export function ControlBar({
@@ -27,11 +29,13 @@ export function ControlBar({
   onToggleMic,
   onToggleParticipants,
   onToggleScreenShare,
+  onToggleWhiteboard,
   participantCount,
   participantsOpen,
   screenShareEnabled,
   screenShareSupported = true,
-  showScreenShare
+  showScreenShare,
+  whiteboardOpen
 }: ControlBarProps): JSX.Element {
   return (
     <section className="room-controls" aria-label="Room controls">
@@ -65,6 +69,15 @@ export function ControlBar({
           <strong>{screenShareEnabled ? 'Stop Share' : 'Share Screen'}</strong>
         </button>
       ) : null}
+      <button
+        className={`control-button whiteboard${whiteboardOpen ? ' active' : ''}`}
+        disabled={disabled}
+        type="button"
+        onClick={onToggleWhiteboard}
+      >
+        <span>Board</span>
+        <strong>{whiteboardOpen ? 'Back Video' : 'Whiteboard'}</strong>
+      </button>
       <button
         className={`control-button${chatOpen ? ' active' : ''}`}
         disabled={disabled}

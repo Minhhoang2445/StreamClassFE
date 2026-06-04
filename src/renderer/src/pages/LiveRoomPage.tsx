@@ -9,10 +9,13 @@ import { ParticipantSidebar } from '../components/classroom/ParticipantSidebar'
 import { TopBar } from '../components/classroom/TopBar'
 import { ErrorBanner } from '../components/live/ErrorBanner'
 import { StatusMessage } from '../components/StatusMessage'
+import { WhiteboardCanvas } from '../components/whiteboard/WhiteboardCanvas'
 import { useAuth } from '../hooks/useAuth'
+import { useSessionStompClient } from '../hooks/useSessionStompClient'
 import { Role } from '../types/auth'
 import type { LiveSessionResponse, LiveSessionTokenResponse } from '../types/liveSession'
 import { LiveSessionStatus } from '../types/liveSession'
+import type { WhiteboardEvent } from '../types/whiteboard'
 import { getApiErrorMessage } from '../utils/apiError'
 
 
@@ -22,6 +25,7 @@ interface LiveRoomLocationState {
 }
 
 type ConnectionUiState = 'idle' | 'loading-token' | 'connecting' | 'connected' | 'disconnected'
+type MainMode = 'VIDEO' | 'WHITEBOARD'
 
 interface MainStageSelection {
   isScreenShare: boolean
@@ -73,6 +77,15 @@ function canStart(role: Role | null, session: LiveSessionResponse | null): boole
 
 function canJoin(role: Role | null, session: LiveSessionResponse | null): boolean {
   return Boolean(session && session.status === LiveSessionStatus.Live && role !== null)
+}
+
+function isWhiteboardActivityEvent(event: WhiteboardEvent): boolean {
+  return (
+    event.type === 'DRAW_START' ||
+    event.type === 'DRAW_POINTS' ||
+    event.type === 'DRAW_END' ||
+    event.type === 'CLEAR'
+  )
 }
 
 function participantDisplayName(
@@ -286,7 +299,7 @@ export function LiveRoomPage(): JSX.Element {
   const { sessionId = '' } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
-  const { role } = useAuth()
+  const { role, username } = useAuth()
   const locationState = location.state as LiveRoomLocationState | null
   const initialToken = locationState?.tokenResponse ?? null
   const returnTo = locationState?.returnTo
@@ -304,11 +317,19 @@ export function LiveRoomPage(): JSX.Element {
   const [screenShareEnabled, setScreenShareEnabled] = useState(false)
   const [participantsOpen, setParticipantsOpen] = useState(true)
   const [chatOpen, setChatOpen] = useState(false)
+  const [mainMode, setMainMode] = useState<MainMode>('VIDEO')
   const [now, setNow] = useState(() => Date.now())
   const [renderVersion, setRenderVersion] = useState(0)
   const roomRef = useRef<Room | null>(null)
   const screenShareOrderRef = useRef<Map<string, number>>(new Map())
   const screenShareCounterRef = useRef(0)
+  const {
+    client: whiteboardStompClient,
+    connected: whiteboardStompConnected,
+    connectVersion: whiteboardConnectionKey
+  } = useSessionStompClient({
+    enabled: Boolean(room && sessionId)
+  })
 
   const syncScreenShareOrder = useCallback((participantsInRoom: Participant[]): void => {
     const activeKeys = new Set<string>()
@@ -583,48 +604,104 @@ export function LiveRoomPage(): JSX.Element {
   }
 
   const toggleScreenShare = async (): Promise<void> => {
-  if (!room) {
-    setError('Chua ket noi LiveKit room.')
-    return
+    if (!room) {
+      setError('Chua ket noi LiveKit room.')
+      return
+    }
+
+    if (role !== Role.Admin && role !== Role.Teacher) {
+      setError('Chi giao vien hoac admin moi duoc share man hinh.')
+      return
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setError(
+        'Moi truong hien tai khong ho tro getDisplayMedia. Neu dang chay Electron, hay cau hinh setDisplayMediaRequestHandler o main process.'
+      )
+      return
+    }
+
+    const nextState = !room.localParticipant.isScreenShareEnabled
+
+    try {
+      console.log('[screen-share] before toggle', {
+        nextState,
+        roomState: room.state,
+        isScreenShareEnabled: room.localParticipant.isScreenShareEnabled,
+        identity: room.localParticipant.identity
+      })
+
+      await room.localParticipant.setScreenShareEnabled(nextState)
+
+      console.log('[screen-share] after toggle', {
+        isScreenShareEnabled: room.localParticipant.isScreenShareEnabled
+      })
+
+      syncParticipants(room)
+      setRenderVersion((value) => value + 1)
+    } catch (err) {
+      console.error('[screen-share] failed:', err)
+
+      setScreenShareEnabled(room.localParticipant.isScreenShareEnabled)
+      setError(getApiErrorMessage(err))
+    }
   }
 
-  if (role !== Role.Admin && role !== Role.Teacher) {
-    setError('Chi giao vien hoac admin moi duoc share man hinh.')
-    return
-  }
+  const openWhiteboard = useCallback((): void => {
+    // TODO(backend): broadcast session presentation state, e.g. WHITEBOARD_OPENED/VIDEO,
+    // so every client switches immediately when the board opens without waiting for draw events.
+    // TODO(livekit): a later version can publish canvas.captureStream() as a LiveKit track;
+    // this version keeps whiteboard realtime over WebSocket events.
+    setMainMode('WHITEBOARD')
+  }, [])
 
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    setError(
-      'Moi truong hien tai khong ho tro getDisplayMedia. Neu dang chay Electron, hay cau hinh setDisplayMediaRequestHandler o main process.'
+  const closeWhiteboard = useCallback((): void => {
+    setMainMode('VIDEO')
+  }, [])
+
+  const toggleWhiteboard = useCallback((): void => {
+    if (mainMode === 'WHITEBOARD') {
+      closeWhiteboard()
+      return
+    }
+
+    openWhiteboard()
+  }, [closeWhiteboard, mainMode, openWhiteboard])
+
+  useEffect(() => {
+    if (!sessionId || !whiteboardStompClient?.connected || !whiteboardStompConnected) {
+      return
+    }
+
+    const subscription = whiteboardStompClient.subscribe(
+      `/topic/sessions/${sessionId}/whiteboard`,
+      (message) => {
+        try {
+          const event = JSON.parse(message.body) as WhiteboardEvent
+
+          if (event.senderUsername && event.senderUsername === username) {
+            return
+          }
+
+          if (isWhiteboardActivityEvent(event)) {
+            setMainMode('WHITEBOARD')
+          }
+        } catch (err) {
+          console.error('Failed to parse whiteboard activity event:', err)
+        }
+      }
     )
-    return
-  }
 
-  const nextState = !room.localParticipant.isScreenShareEnabled
-
-  try {
-    console.log('[screen-share] before toggle', {
-      nextState,
-      roomState: room.state,
-      isScreenShareEnabled: room.localParticipant.isScreenShareEnabled,
-      identity: room.localParticipant.identity
-    })
-
-    await room.localParticipant.setScreenShareEnabled(nextState)
-
-    console.log('[screen-share] after toggle', {
-      isScreenShareEnabled: room.localParticipant.isScreenShareEnabled
-    })
-
-    syncParticipants(room)
-    setRenderVersion((value) => value + 1)
-  } catch (err) {
-    console.error('[screen-share] failed:', err)
-
-    setScreenShareEnabled(room.localParticipant.isScreenShareEnabled)
-    setError(getApiErrorMessage(err))
-  }
-}
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [
+    sessionId,
+    username,
+    whiteboardConnectionKey,
+    whiteboardStompClient,
+    whiteboardStompConnected
+  ])
 
   const participantCount = useMemo(
     () => (room ? remoteParticipants.length + 1 : 0),
@@ -651,6 +728,7 @@ export function LiveRoomPage(): JSX.Element {
   const screenShareSupported = Boolean(navigator.mediaDevices?.getDisplayMedia)
   const durationLabel = formatDuration(session?.actualStartTime ?? null, now)
   const mainParticipantId = participantId(mainStage.participant)
+  const highlightedParticipantId = mainMode === 'WHITEBOARD' ? undefined : mainParticipantId
 
   return (
     <div className="page live-page">
@@ -685,22 +763,34 @@ export function LiveRoomPage(): JSX.Element {
             chatOpen ? ' chat-open' : ''
           }`}
         >
-          <MainStage
-            displayName={
-              room ? participantDisplayName(mainStage.participant, roomToken) : 'Chua ket noi LiveKit'
-            }
-            isLocal={mainStage.participant?.isLocal ?? false}
-            isScreenShare={mainStage.isScreenShare}
-            isTeacher={mainStage.participant ? getIsTeacher(mainStage.participant) : false}
-            mainParticipant={room ? mainStage.participant : null}
-            mainVideoTrack={room ? mainStage.videoTrack : null}
-            presenterCameraTrack={mainStage.presenterCameraTrack}
-          />
+          {mainMode === 'WHITEBOARD' ? (
+            <WhiteboardCanvas
+              connectionKey={whiteboardConnectionKey}
+              currentUsername={username ?? undefined}
+              enabled={Boolean(room)}
+              sessionId={sessionId}
+              stompClient={whiteboardStompClient}
+              stompConnected={whiteboardStompConnected}
+              onClose={closeWhiteboard}
+            />
+          ) : (
+            <MainStage
+              displayName={
+                room ? participantDisplayName(mainStage.participant, roomToken) : 'Chua ket noi LiveKit'
+              }
+              isLocal={mainStage.participant?.isLocal ?? false}
+              isScreenShare={mainStage.isScreenShare}
+              isTeacher={mainStage.participant ? getIsTeacher(mainStage.participant) : false}
+              mainParticipant={room ? mainStage.participant : null}
+              mainVideoTrack={room ? mainStage.videoTrack : null}
+              presenterCameraTrack={mainStage.presenterCameraTrack}
+            />
+          )}
 
           {participantsOpen ? (
             <ParticipantSidebar
               getIsTeacher={getIsTeacher}
-              mainParticipantId={mainParticipantId}
+              mainParticipantId={highlightedParticipantId}
               participants={participants}
             />
           ) : null}
@@ -724,11 +814,13 @@ export function LiveRoomPage(): JSX.Element {
           onToggleMic={() => void toggleMic()}
           onToggleParticipants={() => setParticipantsOpen((value) => !value)}
           onToggleScreenShare={() => void toggleScreenShare()}
+          onToggleWhiteboard={toggleWhiteboard}
           participantCount={participantCount}
           participantsOpen={participantsOpen}
           screenShareEnabled={screenShareEnabled}
           screenShareSupported={screenShareSupported}
           showScreenShare={showScreenShare}
+          whiteboardOpen={mainMode === 'WHITEBOARD'}
         />
       </div>
     </div>
